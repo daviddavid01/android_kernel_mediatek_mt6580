@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-    # ==================== STEP 0: DESCENDING CHECKOUT MECHANISM ====================
+    # ==================== STEP 0: AUTO-DESCENDING CHECKOUT MECHANISM ====================
     - name: Try Checkout via Modern Actions API (Tier 1)
       id: checkout_v4
       continue-on-error: true
@@ -18,6 +18,7 @@ jobs:
 
     - name: Fallback Checkout via Manual Raw Git Stream (Tier 2)
       if: steps.checkout_v4.outcome == 'failure'
+      continue-on-error: true
       run: |
         echo "Modern Checkout failed. Initializing manual raw git fallback..."
         rm -rf ./* .* 2>/dev/null || true
@@ -37,7 +38,7 @@ jobs:
         if [ -f "arch/arm/configs/rainbow_defconfig" ]; then
           FOUND_CONFIG="rainbow_defconfig"
         else
-          SCAN_RESULT=$(find arch/arm/configs/ -name "*rainbow*" -o -name "*mt6580*" -o -name "*mtk*" 2>/dev/null | head -n 1)
+          SCAN_RESULT=$(find arch/arm/configs/ -name "*inharmony*" -o -name "*rainbow*" -o -name "*mt6580*" -o -name "*mtk*" 2>/dev/null | head -n 1)
           if [ -n "$SCAN_RESULT" ]; then
             FOUND_CONFIG=$(basename "$SCAN_RESULT")
           else
@@ -68,14 +69,25 @@ jobs:
           echo "DETECTED_FREQ_FILE=NOT_FOUND" >> $GITHUB_ENV
         fi
 
-    # ==================== STEP 1: DOWNLOADING TOOLCHAIN ====================
-    - name: Download Legacy GCC 4.9 Toolchain
+    # ==================== STEP 1: AUTO-DESCENDING TOOLCHAIN SYSTEM ====================
+    - name: Try Pulling Toolchain via Google Git Master Source (Tier 1)
+      id: pull_google
       continue-on-error: true
       run: |
         mkdir -p ${{ github.workspace }}/toolchain
         cd ${{ github.workspace }}/toolchain
-        # Full explicit string ensures zero redirection drop errors
+        # FULL STRING FIXED: Explicit remote mapping endpoint string
         git clone --depth=1 https://googlesource.com
+
+    - name: Fallback Toolchain via Unofficial GitHub Mirror Mirroring (Tier 2)
+      if: steps.pull_google.outcome == 'failure'
+      continue-on-error: true
+      run: |
+        echo "Google source down or blocked. Descending to GitHub Toolchain mirror source..."
+        mkdir -p ${{ github.workspace }}/toolchain
+        cd ${{ github.workspace }}/toolchain
+        rm -rf arm-linux-androideabi-4.9/ || true
+        git clone --depth=1 https://github.com arm-linux-androideabi-4.9
 
     # ==================== STEP 2: MULTI-ERA DESCENDING COMPILATION ENGINE ====================
     - name: Try Compiling Stock - Modern Tier (Host Ubuntu 24.04)
@@ -87,7 +99,7 @@ jobs:
         export ARCH=arm
         export SUBARCH=arm
         export CROSS_COMPILE=${{ github.workspace }}/toolchain/arm-linux-androideabi-4.9/bin/arm-linux-androideabi-
-        mkdir -p out
+        rm -rf out && mkdir -p out
         make O=out $DETECTED_DEFCONFIG
         make O=out -j$(nproc)
         if [ -f "out/arch/arm/boot/zImage" ]; then 
@@ -196,13 +208,3 @@ jobs:
         elif [ -f "${{ github.workspace }}/output_binaries/zImage-u14" ]; then echo "WORKING_ERA=ubuntu:14.04" >> $GITHUB_ENV; echo "run_oc=true" >> $GITHUB_OUTPUT;
         else echo "run_oc=false" >> $GITHUB_OUTPUT; echo "No base image found across compilation tiers."; fi
 
-    # ==================== STEP 3: OVERCLOCK GENERATION ====================
-    - name: Inject Overclock & Recompile
-      if: steps.set_working_era.outputs.run_oc == 'true' && env.DETECTED_FREQ_FILE != 'NOT_FOUND'
-      continue-on-error: true
-      run: |
-        echo "Injecting Overclock Mod to: $DETECTED_FREQ_FILE"
-        sed -i '/struct cpu_frequency_info mt6580_freqs\[\] = {/a \ \ \ \ \{1495000, 1275\},' "$DETECTED_FREQ_FILE" || sed -i '/freqs\[\] = {/a \ \ \ \ \{1495000, 1275\},' "$DETECTED_FREQ_FILE" || true
-        rm -rf out/ && mkdir -p out
-
-        if [ "$WORKING_ERA" = "host" ]; then

@@ -49,6 +49,7 @@ jobs:
       - name: Download Cross-Compiler (Resilient Mirror Chain)
         run: |
           cd toolchain
+          # Using actual functional prebuilt toolchain endpoints for Android ARM GCC 4.9
           git clone --depth=1 https://googlesource.com || \
           git clone --depth=1 https://github.com arm-linux-androideabi-4.9
 
@@ -58,6 +59,8 @@ jobs:
           export ARCH=arm
           export SUBARCH=arm
           export CROSS_COMPILE=${{ github.workspace }}/toolchain/arm-linux-androideabi-4.9/bin/arm-linux-androideabi-
+          export KBUILD_BUILD_USER=compiler
+          export KBUILD_BUILD_HOST=matrix-engine
           
           if [ "${{ matrix.era }}" = "host" ]; then
             sudo apt-get update && sudo apt-get install -y bc build-essential libncurses5-dev libssl-dev bison flex libelf-dev libtinfo5 || true
@@ -70,6 +73,8 @@ jobs:
               -e SUBARCH=arm \
               -e CROSS_COMPILE=${{ github.workspace }}/toolchain/arm-linux-androideabi-4.9/bin/arm-linux-androideabi- \
               -e TARGET_CONFIG=$TARGET_CONFIG \
+              -e KBUILD_BUILD_USER=compiler \
+              -e KBUILD_BUILD_HOST=matrix-engine \
               ubuntu:${{ matrix.era == 'ubuntu-20.04' && '20.04' || matrix.era == 'ubuntu-18.04' && '18.04' || matrix.era == 'ubuntu-16.04' && '16.04' || '14.04' }} sh -c '
                 apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y bc build-essential libncurses5-dev libssl-dev bison flex libelf-dev libtinfo5 2>/dev/null || true
                 if [ "${{ matrix.era }}" = "ubuntu-16.04" ] || [ "${{ matrix.era }}" = "ubuntu-14.04" ]; then
@@ -94,6 +99,8 @@ jobs:
           export ARCH=arm
           export SUBARCH=arm
           export CROSS_COMPILE=${{ github.workspace }}/toolchain/arm-linux-androideabi-4.9/bin/arm-linux-androideabi-
+          export KBUILD_BUILD_USER=compiler
+          export KBUILD_BUILD_HOST=matrix-engine
           
           if [ "${{ matrix.era }}" = "host" ]; then
             make O=out $TARGET_CONFIG && make O=out -j$(nproc)
@@ -105,6 +112,8 @@ jobs:
               -e SUBARCH=arm \
               -e CROSS_COMPILE=${{ github.workspace }}/toolchain/arm-linux-androideabi-4.9/bin/arm-linux-androideabi- \
               -e TARGET_CONFIG=$TARGET_CONFIG \
+              -e KBUILD_BUILD_USER=compiler \
+              -e KBUILD_BUILD_HOST=matrix-engine \
               ubuntu:${{ matrix.era == 'ubuntu-20.04' && '20.04' || matrix.era == 'ubuntu-18.04' && '18.04' || matrix.era == 'ubuntu-16.04' && '16.04' || '14.04' }} sh -c '
                 apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y bc build-essential libncurses5-dev libssl-dev bison flex libelf-dev libtinfo5 2>/dev/null || true
                 if [ "${{ matrix.era }}" = "ubuntu-16.04" ] || [ "${{ matrix.era }}" = "ubuntu-14.04" ]; then

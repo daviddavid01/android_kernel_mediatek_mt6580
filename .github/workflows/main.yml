@@ -1,5 +1,4 @@
 name: Ultimate Concurrent Matrix Compiler
-
 on:
   workflow_dispatch:
 
@@ -12,106 +11,115 @@ jobs:
     runs-on: ubuntu-24.04
     continue-on-error: true
     strategy:
-      # Ensures that if one container environment fails, the others keep compiling
-      fail-fast: false 
+      fail-fast: false
       matrix:
-        # Define all environment combinations to build concurrently
         era: [host, ubuntu-20.04, ubuntu-18.04, ubuntu-16.04, ubuntu-14.04]
-
+        
     steps:
-    - name: Autonomous Checkout Engine
-      run: |
-        echo "=== Manual Shallow Fast Clone ==="
-        rm -rf ./* .* 2>/dev/null || true
-        git clone --depth=1 --branch=${{ github.ref_name }} https://github.com{{ github.repository }}.git .
+      - name: Autonomous Checkout Engine
+        uses: actions/checkout@v4
 
-    - name: Setup Shared Workspace Directories
-      run: mkdir -p output_binaries toolchain out
+      - name: Setup Shared Workspace Directories
+        run: mkdir -p output_binaries toolchain out
 
-    - name: Smart Auto-Discovery Engine
-      id: discovery
-      run: |
-        echo "===== EXECUTING TARGET PROFILE AUTO-DETECTION ====="
-        FOUND_CONFIG=""
-        for pattern in "rainbow_defconfig" "*sf6580*" "*inharmony*" "*weg*" "*mt6580*" "*mtk*" "*defconfig*"; do
-          SCAN=$(find arch/arm/configs/ -name "$pattern" 2>/dev/null | head -n 1)
-          if [ -n "$SCAN" ]; then FOUND_CONFIG=$(basename "$SCAN"); break; fi
-        done
-        if [ -z "$FOUND_CONFIG" ]; then FOUND_CONFIG=$(find arch/arm/configs/ -type f 2>/dev/null | head -n 1 | xargs basename); fi
-        echo "TARGET_CONFIG=$FOUND_CONFIG" >> $GITHUB_ENV
-        
-        TARGET_FREQ=$(find . -name "mt_cpufreq.c" | head -n 1 | sed 's|^\./||')
-        if [ -n "$TARGET_FREQ" ]; then echo "FREQ_FILE=$TARGET_FREQ" >> $GITHUB_ENV; else echo "FREQ_FILE=NOT_FOUND" >> $GITHUB_ENV; fi
+      - name: Smart Auto-Discovery Engine
+        id: discovery
+        run: |
+          echo "===== EXECUTING TARGET PROFILE AUTO-DETECTION ====="
+          FOUND_CONFIG=""
+          for pattern in "rainbow_defconfig" "*sf6580*" "*inharmony*" "*weg*" "*mt6580*" "*mtk*" "*defconfig*"; do
+            SCAN=$(find arch/arm/configs/ -name "$pattern" 2>/dev/null | head -n 1)
+            if [ -n "$SCAN" ]; then
+              FOUND_CONFIG=$(basename "$SCAN")
+              break
+            fi
+          done
+          if [ -z "$FOUND_CONFIG" ]; then
+            FOUND_CONFIG=$(find arch/arm/configs/ -type f 2>/dev/null | head -n 1 | xargs basename)
+          fi
+          echo "TARGET_CONFIG=$FOUND_CONFIG" >> $GITHUB_ENV
+          
+          TARGET_FREQ=$(find . -name "mt_cpufreq.c" | head -n 1 | sed 's|^\./||')
+          if [ -n "$TARGET_FREQ" ]; then
+            echo "FREQ_FILE=$TARGET_FREQ" >> $GITHUB_ENV
+          else
+            echo "FREQ_FILE=NOT_FOUND" >> $GITHUB_ENV
+          fi
 
-    - name: Download Cross-Compiler (Resilient Mirror Chain)
-      run: |
-        cd toolchain
-        git clone --depth=1 https://googlesource.com || \
-        git clone --depth=1 https://github.com arm-linux-androideabi-4.9
+      - name: Download Cross-Compiler (Resilient Mirror Chain)
+        run: |
+          cd toolchain
+          git clone --depth=1 https://googlesource.com || \
+          git clone --depth=1 https://github.com arm-linux-androideabi-4.9
 
-    # --- STOCK COMPILATION PIPELINE (RUNNING IN PARALLEL) ---
-    - name: Build Stock Kernel [${{ matrix.era }}]
-      run: |
-        export ARCH=arm && export SUBARCH=arm
-        export CROSS_COMPILE=${{ github.workspace }}/toolchain/arm-linux-androideabi-4.9/bin/arm-linux-androideabi-
-        
-        if [ "${{ matrix.era }}" = "host" ]; then
-          sudo apt-get update && sudo apt-get install -y bc build-essential libncurses5-dev libssl-dev bison flex libelf-dev libtinfo5 || true
-          make O=out $TARGET_CONFIG && make O=out -j$(nproc)
-        elif [ "${{ matrix.era }}" = "ubuntu-20.04" ]; then
-          docker run --rm -v ${{ github.workspace }}:${{ github.workspace }} -w ${{ github.workspace }} ubuntu:20.04 sh -c '
-            apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y bc build-essential libncurses5-dev libssl-dev bison flex libelf-dev libtinfo5 || true
-            make O=out $TARGET_CONFIG && make O=out -j$(nproc)'
-        elif [ "${{ matrix.era }}" = "ubuntu-18.04" ]; then
-          docker run --rm -v ${{ github.workspace }}:${{ github.workspace }} -w ${{ github.workspace }} ubuntu:18.04 sh -c '
-            apt-get update && apt-get install -y bc build-essential libncurses5-dev libssl-dev bison flex libelf-dev || true
-            make O=out $TARGET_CONFIG && make O=out -j$(nproc)'
-        elif [ "${{ matrix.era }}" = "ubuntu-16.04" ]; then
-          docker run --rm -v ${{ github.workspace }}:${{ github.workspace }} -w ${{ github.workspace }} ubuntu:16.04 sh -c '
-            apt-get update && apt-get install -y bc build-essential libncurses5-dev libssl-dev bison flex libelf-dev || true
-            find . -name "Makefile" | xargs sed -i "s/-Werror//g" || true
-            make O=out $TARGET_CONFIG && make O=out -j$(nproc)'
-        elif [ "${{ matrix.era }}" = "ubuntu-14.04" ]; then
-          docker run --rm -v ${{ github.workspace }}:${{ github.workspace }} -w ${{ github.workspace }} ubuntu:14.04 sh -c '
-            apt-get update && apt-get install -y bc build-essential libncurses5-dev libssl-dev bison flex || true
-            find . -name "Makefile" | xargs sed -i "s/-Werror//g" || true
-            make O=out $TARGET_CONFIG && make O=out -j$(nproc)'
-        fi
-        
-        if [ -f "out/arch/arm/boot/zImage" ]; then
-          cp out/arch/arm/boot/zImage output_binaries/zImage-stock-${{ matrix.era }}
-        fi
+      # --- STOCK COMPILATION PIPELINE (RUNNING IN PARALLEL) ---
+      - name: Build Stock Kernel [${{ matrix.era }}]
+        run: |
+          export ARCH=arm
+          export SUBARCH=arm
+          export CROSS_COMPILE=${{ github.workspace }}/toolchain/arm-linux-androideabi-4.9/bin/arm-linux-androideabi-
+          
+          if [ "${{ matrix.era }}" = "host" ]; then
+            sudo apt-get update && sudo apt-get install -y bc build-essential libncurses5-dev libssl-dev bison flex libelf-dev libtinfo5 || true
+            make O=out $TARGET_CONFIG && make O=out -j$(nproc)
+          else
+            docker run --rm \
+              -v ${{ github.workspace }}:${{ github.workspace }} \
+              -w ${{ github.workspace }} \
+              -e ARCH=arm \
+              -e SUBARCH=arm \
+              -e CROSS_COMPILE=${{ github.workspace }}/toolchain/arm-linux-androideabi-4.9/bin/arm-linux-androideabi- \
+              -e TARGET_CONFIG=$TARGET_CONFIG \
+              ubuntu:${{ matrix.era == 'ubuntu-20.04' && '20.04' || matrix.era == 'ubuntu-18.04' && '18.04' || matrix.era == 'ubuntu-16.04' && '16.04' || '14.04' }} sh -c '
+                apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y bc build-essential libncurses5-dev libssl-dev bison flex libelf-dev libtinfo5 2>/dev/null || true
+                if [ "${{ matrix.era }}" = "ubuntu-16.04" ] || [ "${{ matrix.era }}" = "ubuntu-14.04" ]; then
+                  find . -name "Makefile" | xargs sed -i "s/-Werror//g" || true
+                fi
+                make O=out $TARGET_CONFIG && make O=out -j$(nproc)
+              '
+          fi
+          
+          if [ -f "out/arch/arm/boot/zImage" ]; then
+            cp out/arch/arm/boot/zImage output_binaries/zImage-stock-${{ matrix.era }}
+          fi
 
-    # --- AUTOMATED INDEPENDENT OVERCLOCK PIPELINE (RUNNING IN PARALLEL) ---
-    - name: Build Overclocked Kernel [${{ matrix.era }}]
-      if: env.FREQ_FILE != 'NOT_FOUND'
-      run: |
-        echo "Injecting overclock array parameters..."
-        sed -i '/struct cpu_frequency_info mt6580_freqs\[\] = {/a \ \ \ \ \{1495000, 1275\},' "$FREQ_FILE" || sed -i '/freqs\[\] = {/a \ \ \ \ \{1495000, 1275\},' "$FREQ_FILE" || true
-        rm -rf out && mkdir -p out
-        
-        export ARCH=arm && export SUBARCH=arm
-        export CROSS_COMPILE=${{ github.workspace }}/toolchain/arm-linux-androideabi-4.9/bin/arm-linux-androideabi-
-        
-        if [ "${{ matrix.era }}" = "host" ]; then
-          make O=out $TARGET_CONFIG && make O=out -j$(nproc)
-        elif [ "${{ matrix.era }}" = "ubuntu-20.04" ] || [ "${{ matrix.era }}" = "ubuntu-18.04" ]; then
-          docker run --rm -v ${{ github.workspace }}:${{ github.workspace }} -w ${{ github.workspace }} ${{ matrix.era == 'ubuntu-20.04' && 'ubuntu:20.04' || 'ubuntu:18.04' }} sh -c '
-            apt-get update && apt-get install -y bc build-essential libncurses5-dev libssl-dev bison flex libelf-dev libtinfo5 || true
-            make O=out $TARGET_CONFIG && make O=out -j$(nproc)'
-        elif [ "${{ matrix.era }}" = "ubuntu-16.04" ] || [ "${{ matrix.era }}" = "ubuntu-14.04" ]; then
-          docker run --rm -v ${{ github.workspace }}:${{ github.workspace }} -w ${{ github.workspace }} ${{ matrix.era == 'ubuntu-16.04' && 'ubuntu:16.04' || 'ubuntu:14.04' }} sh -c '
-            apt-get update && apt-get install -y bc build-essential libncurses5-dev libssl-dev bison flex || true
-            find . -name "Makefile" | xargs sed -i "s/-Werror//g" || true
-            make O=out $TARGET_CONFIG && make O=out -j$(nproc)'
-        fi
-        
-        if [ -f "out/arch/arm/boot/zImage" ]; then
-          cp out/arch/arm/boot/zImage output_binaries/zImage-overclocked-${{ matrix.era }}
-        fi
+      # --- AUTOMATED INDEPENDENT OVERCLOCK PIPELINE (RUNNING IN PARALLEL) ---
+      - name: Build Overclocked Kernel [${{ matrix.era }}]
+        if: env.FREQ_FILE != 'NOT_FOUND'
+        run: |
+          echo "Injecting overclock array parameters..."
+          sed -i '/struct cpu_frequency_info mt6580_freqs\[\] = {/a \ \ \ \ \{1495000, 1275\},' "$FREQ_FILE" || sed -i '/freqs\[\] = {/a \ \ \ \ \{1495000, 1275\},' "$FREQ_FILE" || true
+          rm -rf out && mkdir -p out
+          
+          export ARCH=arm
+          export SUBARCH=arm
+          export CROSS_COMPILE=${{ github.workspace }}/toolchain/arm-linux-androideabi-4.9/bin/arm-linux-androideabi-
+          
+          if [ "${{ matrix.era }}" = "host" ]; then
+            make O=out $TARGET_CONFIG && make O=out -j$(nproc)
+          else
+            docker run --rm \
+              -v ${{ github.workspace }}:${{ github.workspace }} \
+              -w ${{ github.workspace }} \
+              -e ARCH=arm \
+              -e SUBARCH=arm \
+              -e CROSS_COMPILE=${{ github.workspace }}/toolchain/arm-linux-androideabi-4.9/bin/arm-linux-androideabi- \
+              -e TARGET_CONFIG=$TARGET_CONFIG \
+              ubuntu:${{ matrix.era == 'ubuntu-20.04' && '20.04' || matrix.era == 'ubuntu-18.04' && '18.04' || matrix.era == 'ubuntu-16.04' && '16.04' || '14.04' }} sh -c '
+                apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y bc build-essential libncurses5-dev libssl-dev bison flex libelf-dev libtinfo5 2>/dev/null || true
+                if [ "${{ matrix.era }}" = "ubuntu-16.04" ] || [ "${{ matrix.era }}" = "ubuntu-14.04" ]; then
+                  find . -name "Makefile" | xargs sed -i "s/-Werror//g" || true
+                fi
+                make O=out $TARGET_CONFIG && make O=out -j$(nproc)
+              '
+          fi
+          
+          if [ -f "out/arch/arm/boot/zImage" ]; then
+            cp out/arch/arm/boot/zImage output_binaries/zImage-overclocked-${{ matrix.era }}
+          fi
 
-    - name: Sideload Artifact Blocks
-      uses: actions/upload-artifact@v4
-      with:
-        name: MT6580-Kernel-${{ matrix.era }}
-        path: ${{ github.workspace }}/output_binaries/*
+      - name: Sideload Artifact Blocks
+        uses: actions/upload-artifact@v4
+        with:
+          name: MT6580-Kernel-${{ matrix.era }}
+          path: ${{ github.workspace }}/output_binaries/*

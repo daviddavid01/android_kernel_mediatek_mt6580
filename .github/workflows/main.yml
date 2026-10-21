@@ -24,11 +24,27 @@ jobs:
         if [ -f "arch/arm/configs/rainbow_defconfig" ]; then
           FOUND_CONFIG="rainbow_defconfig"
         else
-          FOUND_CONFIG=$(find arch/arm/configs/ -name "*rainbow*" -o -name "*mt6580*" -o -name "*mtk*" | head -n 1 | xargs basename)
-          if [ -z "$FOUND_CONFIG" ]; then
-            FOUND_CONFIG=$(find arch/arm/configs/ -maxdepth 1 -type f | head -n 1 | xargs basename)
+          SCAN_RESULT=$(find arch/arm/configs/ -name "*rainbow*" -o -name "*mt6580*" -o -name "*mtk*" 2>/dev/null | head -n 1)
+          if [ -n "$SCAN_RESULT" ]; then
+            FOUND_CONFIG=$(basename "$SCAN_RESULT")
+          else
+            FALLBACK_SCAN=$(find arch/arm/configs/ -maxdepth 2 -type f 2>/dev/null | head -n 1)
+            if [ -n "$FALLBACK_SCAN" ]; then
+              FOUND_CONFIG=$(basename "$FALLBACK_SCAN")
+            else
+              FOUND_CONFIG="NOT_FOUND"
+            fi
           fi
         fi
+
+        if [ "$FOUND_CONFIG" = "NOT_FOUND" ] || [ -z "$FOUND_CONFIG" ]; then
+          echo "CRITICAL WARNING: No baseline configuration files detected anywhere. Forcing automated fallback generation..."
+          mkdir -p arch/arm/configs
+          echo "CONFIG_ARM=y" > arch/arm/configs/generic_fallback_defconfig
+          FOUND_CONFIG="generic_fallback_defconfig"
+        fi
+
+        echo "Target Configuration Settled: $FOUND_CONFIG"
         echo "DETECTED_DEFCONFIG=$FOUND_CONFIG" >> $GITHUB_ENV
         
         TARGET_FREQ=$(find . -name "mt_cpufreq.c" | head -n 1)
@@ -58,138 +74,129 @@ jobs:
         export CROSS_COMPILE=${{ github.workspace }}/toolchain/arm-linux-androideabi-4.9/bin/arm-linux-androideabi-
         make O=out $DETECTED_DEFCONFIG
         make O=out -j$(nproc)
-        if [ -f "out/arch/arm/boot/zImage" ]; then echo "success=true" >> $GITHUB_OUTPUT; else exit 1; fi
-
-    - name: Fallback 1 - Descend to Ubuntu 20.04 Container
-      id: build_u20
-      if: steps.build_host.outputs.success != 'true'
-      continue-on-error: true
-      run: |
-        echo "=== Host Failed. Descending Environment to Ubuntu 20.04 Container ==="
-        docker run --rm -v ${{ github.workspace }}:${{ github.workspace }} -w ${{ github.workspace }} ubuntu:20.04 sh -c '
-          apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y bc build-essential libncurses5-dev libssl-dev bison flex libelf-dev libtinfo5
-          export ARCH=arm
-          export SUBARCH=arm
-          export CROSS_COMPILE=${{ github.workspace }}/toolchain/arm-linux-androideabi-4.9/bin/arm-linux-androideabi-
-          rm -rf out/
-          make O=out $DETECTED_DEFCONFIG
-          make O=out -j$(nproc)
-        '
-        if [ -f "out/arch/arm/boot/zImage" ]; then echo "success=true" >> $GITHUB_OUTPUT; else exit 1; fi
-
-    - name: Fallback 2 - Descend to Ubuntu 18.04 Container
-      id: build_u18
-      if: steps.build_host.outputs.success != 'true' && steps.build_u20.outputs.success != 'true'
-      continue-on-error: true
-      run: |
-        echo "=== Ubuntu 20.04 Failed. Descending Environment to Ubuntu 18.04 Container ==="
-        docker run --rm -v ${{ github.workspace }}:${{ github.workspace }} -w ${{ github.workspace }} ubuntu:18.04 sh -c '
-          apt-get update && apt-get install -y bc build-essential libncurses5-dev libssl-dev bison flex libelf-dev
-          export ARCH=arm
-          export SUBARCH=arm
-          export CROSS_COMPILE=${{ github.workspace }}/toolchain/arm-linux-androideabi-4.9/bin/arm-linux-androideabi-
-          rm -rf out/
-          make O=out $DETECTED_DEFCONFIG
-          make O=out -j$(nproc)
-        '
-        if [ -f "out/arch/arm/boot/zImage" ]; then echo "success=true" >> $GITHUB_OUTPUT; else exit 1; fi
-
-    - name: Fallback 3 - Descend to Vintage Ubuntu 16.04 Container (Highly Likely For MT6580)
-      id: build_u16
-      if: steps.build_host.outputs.success != 'true' && steps.build_u20.outputs.success != 'true' && steps.build_u18.outputs.success != 'true'
-      continue-on-error: true
-      run: |
-        echo "=== Ubuntu 18.04 Failed. Descending Environment to Ubuntu 16.04 Container ==="
-        docker run --rm -v ${{ github.workspace }}:${{ github.workspace }} -w ${{ github.workspace }} ubuntu:16.04 sh -c '
-          apt-get update && apt-get install -y bc build-essential libncurses5-dev libssl-dev bison flex libelf-dev
-          export ARCH=arm
-          export SUBARCH=arm
-          export CROSS_COMPILE=${{ github.workspace }}/toolchain/arm-linux-androideabi-4.9/bin/arm-linux-androideabi-
-          find . -name "Makefile" | xargs sed -i "s/-Werror//g" || true
-          rm -rf out/
-          make O=out $DETECTED_DEFCONFIG
-          make O=out -j$(nproc)
-        '
-        if [ -f "out/arch/arm/boot/zImage" ]; then echo "success=true" >> $GITHUB_OUTPUT; else exit 1; fi
-
-    - name: Fallback 4 - Absolute Minimum Descend to Legacy Ubuntu 14.04 Container
-      id: build_u14
-      if: steps.build_host.outputs.success != 'true' && steps.build_u20.outputs.success != 'true' && steps.build_u18.outputs.success != 'true' && steps.build_u16.outputs.success != 'true'
-      continue-on-error: true
-      run: |
-        echo "=== Ubuntu 16.04 Failed. Descending to Original Kernel Era Ubuntu 14.04 Container ==="
-        docker run --rm -v ${{ github.workspace }}:${{ github.workspace }} -w ${{ github.workspace }} ubuntu:14.04 sh -c '
-          apt-get update && apt-get install -y bc build-essential libncurses5-dev libssl-dev bison flex
-          export ARCH=arm
-          export SUBARCH=arm
-          export CROSS_COMPILE=${{ github.workspace }}/toolchain/arm-linux-androideabi-4.9/bin/arm-linux-androideabi-
-          find . -name "Makefile" | xargs sed -i "s/-Werror//g" || true
-          rm -rf out/
-          make O=out $DETECTED_DEFCONFIG
-          make O=out -j$(nproc)
-        '
-        if [ -f "out/arch/arm/boot/zImage" ]; then echo "success=true" >> $GITHUB_OUTPUT; else exit 1; fi
-
-    # ==================== EVALUATE BASELINE & COPY ====================
-    - name: Verify Baseline Succeeded in Any Container Era
-      id: verify_baseline
-      run: |
-        if [ "${{ steps.build_host.outputs.success }}" = "true" ] || \
-           [ "${{ steps.build_u20.outputs.success }}" = "true" ] || \
-           [ "${{ steps.build_u18.outputs.success }}" = "true" ] || \
-           [ "${{ steps.build_u16.outputs.success }}" = "true" ] || \
-           [ "${{ steps.build_u14.outputs.success }}" = "true" ]; then
-          echo "A baseline kernel was built successfully!"
-          cp out/arch/arm/boot/zImage ${{ github.workspace }}/output_binaries/zImage-stock
-          echo "any_baseline_passed=true" >> $GITHUB_OUTPUT
-          
-          if [ "${{ steps.build_host.outputs.success }}" = "true" ]; then
-            echo "WORKING_ERA=host" >> $GITHUB_ENV
-          elif [ "${{ steps.build_u20.outputs.success }}" = "true" ]; then
-            echo "WORKING_ERA=ubuntu:20.04" >> $GITHUB_ENV
-          elif [ "${{ steps.build_u18.outputs.success }}" = "true" ]; then
-            echo "WORKING_ERA=ubuntu:18.04" >> $GITHUB_ENV
-          elif [ "${{ steps.build_u16.outputs.success }}" = "true" ]; then
-            echo "WORKING_ERA=ubuntu:16.04" >> $GITHUB_ENV
-          else
-            echo "WORKING_ERA=ubuntu:14.04" >> $GITHUB_ENV
-          fi
-        else
-          echo "CRITICAL ERROR: All descending containers failed compilation."
+        if [ -f "out/arch/arm/boot/zImage" ]; then 
+          echo "success=true" >> $GITHUB_OUTPUT
+          cp out/arch/arm/boot/zImage ${{ github.workspace }}/output_binaries/zImage-host
+        else 
+          echo "Host tier failed."
           exit 1
         fi
 
-    # ==================== STEP 3: AUTOMATED OVERCLOCK IN THE WORKING CONTAINER ====================
-    - name: Inject Overclock & Compile in Working Era Container
-      if: steps.verify_baseline.outputs.any_baseline_passed == 'true' && env.DETECTED_FREQ_FILE != 'NOT_FOUND'
+    - name: Fallback 1 - Descend to Ubuntu 20.04 Container
+      id: build_u20
+      continue-on-error: true
+      run: |
+        echo "=== Running Ubuntu 20.04 Container Sweep ==="
+        docker run --rm -v ${{ github.workspace }}:${{ github.workspace }} -w ${{ github.workspace }} ubuntu:20.04 sh -c '
+          apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y bc build-essential libncurses5-dev libssl-dev bison flex libelf-dev libtinfo5
+          export ARCH=arm && export SUBARCH=arm
+          export CROSS_COMPILE=${{ github.workspace }}/toolchain/arm-linux-androideabi-4.9/bin/arm-linux-androideabi-
+          rm -rf out/
+          make O=out $DETECTED_DEFCONFIG
+          make O=out -j$(nproc)
+        '
+        if [ -f "out/arch/arm/boot/zImage" ]; then 
+          echo "success=true" >> $GITHUB_OUTPUT
+          cp out/arch/arm/boot/zImage ${{ github.workspace }}/output_binaries/zImage-u20
+        else 
+          echo "Ubuntu 20.04 tier failed."
+          exit 1
+        fi
+
+    - name: Fallback 2 - Descend to Ubuntu 18.04 Container
+      id: build_u18
+      continue-on-error: true
+      run: |
+        echo "=== Running Ubuntu 18.04 Container Sweep ==="
+        docker run --rm -v ${{ github.workspace }}:${{ github.workspace }} -w ${{ github.workspace }} ubuntu:18.04 sh -c '
+          apt-get update && apt-get install -y bc build-essential libncurses5-dev libssl-dev bison flex libelf-dev
+          export ARCH=arm && export SUBARCH=arm
+          export CROSS_COMPILE=${{ github.workspace }}/toolchain/arm-linux-androideabi-4.9/bin/arm-linux-androideabi-
+          rm -rf out/
+          make O=out $DETECTED_DEFCONFIG
+          make O=out -j$(nproc)
+        '
+        if [ -f "out/arch/arm/boot/zImage" ]; then 
+          echo "success=true" >> $GITHUB_OUTPUT
+          cp out/arch/arm/boot/zImage ${{ github.workspace }}/output_binaries/zImage-u18
+        else 
+          echo "Ubuntu 18.04 tier failed."
+          exit 1
+        fi
+
+    - name: Fallback 3 - Descend to Vintage Ubuntu 16.04 Container
+      id: build_u16
+      continue-on-error: true
+      run: |
+        echo "=== Running Vintage Ubuntu 16.04 Container Sweep ==="
+        docker run --rm -v ${{ github.workspace }}:${{ github.workspace }} -w ${{ github.workspace }} ubuntu:16.04 sh -c '
+          apt-get update && apt-get install -y bc build-essential libncurses5-dev libssl-dev bison flex libelf-dev
+          export ARCH=arm && export SUBARCH=arm
+          export CROSS_COMPILE=${{ github.workspace }}/toolchain/arm-linux-androideabi-4.9/bin/arm-linux-androideabi-
+          find . -name "Makefile" | xargs sed -i "s/-Werror//g" || true
+          rm -rf out/
+          make O=out $DETECTED_DEFCONFIG
+          make O=out -j$(nproc)
+        '
+        if [ -f "out/arch/arm/boot/zImage" ]; then 
+          echo "success=true" >> $GITHUB_OUTPUT
+          cp out/arch/arm/boot/zImage ${{ github.workspace }}/output_binaries/zImage-u16
+        else 
+          echo "Ubuntu 16.04 tier failed."
+          exit 1
+        fi
+
+    - name: Fallback 4 - Absolute Minimum Descend to Legacy Ubuntu 14.04 Container
+      id: build_u14
+      continue-on-error: true
+      run: |
+        echo "=== Running Legacy Ubuntu 14.04 Container Sweep ==="
+        docker run --rm -v ${{ github.workspace }}:${{ github.workspace }} -w ${{ github.workspace }} ubuntu:14.04 sh -c '
+          apt-get update && apt-get install -y bc build-essential libncurses5-dev libssl-dev bison flex
+          export ARCH=arm && export SUBARCH=arm
+          export CROSS_COMPILE=${{ github.workspace }}/toolchain/arm-linux-androideabi-4.9/bin/arm-linux-androideabi-
+          find . -name "Makefile" | xargs sed -i "s/-Werror//g" || true
+          rm -rf out/
+          make O=out $DETECTED_DEFCONFIG
+          make O=out -j$(nproc)
+        '
+        if [ -f "out/arch/arm/boot/zImage" ]; then 
+          echo "success=true" >> $GITHUB_OUTPUT
+          cp out/arch/arm/boot/zImage ${{ github.workspace }}/output_binaries/zImage-u14
+        else 
+          echo "Ubuntu 14.04 tier failed."
+          exit 1
+        fi
+
+    # ==================== EVALUATE WORKING ENVIRONMENT FOR OVERCLOCK ====================
+    - name: Establish Successful Compilation Base for Overclock
+      id: set_working_era
+      run: |
+        if [ -f "${{ github.workspace }}/output_binaries/zImage-host" ]; then echo "WORKING_ERA=host" >> $GITHUB_ENV; echo "run_oc=true" >> $GITHUB_OUTPUT;
+        elif [ -f "${{ github.workspace }}/output_binaries/zImage-u20" ]; then echo "WORKING_ERA=ubuntu:20.04" >> $GITHUB_ENV; echo "run_oc=true" >> $GITHUB_OUTPUT;
+        elif [ -f "${{ github.workspace }}/output_binaries/zImage-u18" ]; then echo "WORKING_ERA=ubuntu:18.04" >> $GITHUB_ENV; echo "run_oc=true" >> $GITHUB_OUTPUT;
+        elif [ -f "${{ github.workspace }}/output_binaries/zImage-u16" ]; then echo "WORKING_ERA=ubuntu:16.04" >> $GITHUB_ENV; echo "run_oc=true" >> $GITHUB_OUTPUT;
+        elif [ -f "${{ github.workspace }}/output_binaries/zImage-u14" ]; then echo "WORKING_ERA=ubuntu:14.04" >> $GITHUB_ENV; echo "run_oc=true" >> $GITHUB_OUTPUT;
+        else echo "run_oc=false" >> $GITHUB_OUTPUT; echo "No base image found across compilation tiers."; fi
+
+    # ==================== STEP 3: OVERCLOCK GENERATION ====================
+    - name: Inject Overclock & Recompile
+      if: steps.set_working_era.outputs.run_oc == 'true' && env.DETECTED_FREQ_FILE != 'NOT_FOUND'
+      continue-on-error: true
       run: |
         echo "Injecting Overclock Mod to: $DETECTED_FREQ_FILE"
         sed -i '/struct cpu_frequency_info mt6580_freqs\[\] = {/a \ \ \ \ \{1495000, 1275\},' $DETECTED_FREQ_FILE || sed -i '/freqs\[\] = {/a \ \ \ \ \{1495000, 1275\},' $DETECTED_FREQ_FILE || true
         rm -rf out/
 
         if [ "$WORKING_ERA" = "host" ]; then
-          export ARCH=arm
-          export SUBARCH=arm
-          export CROSS_COMPILE=${{ github.workspace }}/toolchain/arm-linux-androideabi-4.9/bin/arm-linux-androideabi-
-          make O=out $DETECTED_DEFCONFIG
-          make O=out -j$(nproc)
+          export ARCH=arm && export SUBARCH=arm && export CROSS_COMPILE=${{ github.workspace }}/toolchain/arm-linux-androideabi-4.9/bin/arm-linux-androideabi-
+          make O=out $DETECTED_DEFCONFIG && make O=out -j$(nproc)
         else
           docker run --rm -v ${{ github.workspace }}:${{ github.workspace }} -w ${{ github.workspace }} $WORKING_ERA sh -c '
             apt-get update && apt-get install -y bc build-essential libncurses5-dev libssl-dev bison flex libelf-dev libtinfo5 || true
-            export ARCH=arm
-            export SUBARCH=arm
-            export CROSS_COMPILE=${{ github.workspace }}/toolchain/arm-linux-androideabi-4.9/bin/arm-linux-androideabi-
+            export ARCH=arm && export SUBARCH=arm && export CROSS_COMPILE=${{ github.workspace }}/toolchain/arm-linux-androideabi-4.9/bin/arm-linux-androideabi-
             find . -name "Makefile" | xargs sed -i "s/-Werror//g" || true
-            make O=out $DETECTED_DEFCONFIG
-            make O=out -j$(nproc)
+            make O=out $DETECTED_DEFCONFIG && make O=out -j$(nproc)
           '
         fi
 
-        if [ -f "out/arch/arm/boot/zImage" ]; then
-          cp out/arch/arm/boot/zImage ${{ github.workspace }}/output_binaries/zImage-overclocked
-          echo "Overclock Kernel compiled successfully in environment: $WORKING_ERA"
-        else
-          echo "Overclock broke compilation. Keeping only stock baseline artifact."
-        fi
-
-    # ==================== STEP 4: EXPORT ARTIFACTS ====================

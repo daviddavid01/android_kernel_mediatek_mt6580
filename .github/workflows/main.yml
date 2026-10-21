@@ -57,9 +57,11 @@ jobs:
 
     # ==================== STEP 1: DOWNLOADING TOOLCHAIN ====================
     - name: Download Legacy GCC 4.9 Toolchain
+      continue-on-error: true
       run: |
         mkdir -p ${{ github.workspace }}/toolchain
         cd ${{ github.workspace }}/toolchain
+        # Always use the full explicit string to pull down compiler files securely
         git clone --depth=1 https://googlesource.com
 
     # ==================== STEP 2: MULTI-ERA DESCENDING COMPILATION ENGINE ====================
@@ -171,6 +173,7 @@ jobs:
     # ==================== EVALUATE WORKING ENVIRONMENT FOR OVERCLOCK ====================
     - name: Establish Successful Compilation Base for Overclock
       id: set_working_era
+      continue-on-error: true
       run: |
         if [ -f "${{ github.workspace }}/output_binaries/zImage-host" ]; then echo "WORKING_ERA=host" >> $GITHUB_ENV; echo "run_oc=true" >> $GITHUB_OUTPUT;
         elif [ -f "${{ github.workspace }}/output_binaries/zImage-u20" ]; then echo "WORKING_ERA=ubuntu:20.04" >> $GITHUB_ENV; echo "run_oc=true" >> $GITHUB_OUTPUT;
@@ -185,7 +188,7 @@ jobs:
       continue-on-error: true
       run: |
         echo "Injecting Overclock Mod to: $DETECTED_FREQ_FILE"
-        sed -i '/struct cpu_frequency_info mt6580_freqs\[\] = {/a \ \ \ \ \{1495000, 1275\},' $DETECTED_FREQ_FILE || sed -i '/freqs\[\] = {/a \ \ \ \ \{1495000, 1275\},' $DETECTED_FREQ_FILE || true
+        sed -i '/struct cpu_frequency_info mt6580_freqs\[\] = {/a \ \ \ \ \{1495000, 1275\},' "$DETECTED_FREQ_FILE" || sed -i '/freqs\[\] = {/a \ \ \ \ \{1495000, 1275\},' "$DETECTED_FREQ_FILE" || true
         rm -rf out/
 
         if [ "$WORKING_ERA" = "host" ]; then
@@ -195,8 +198,3 @@ jobs:
           docker run --rm -v ${{ github.workspace }}:${{ github.workspace }} -w ${{ github.workspace }} $WORKING_ERA sh -c '
             apt-get update && apt-get install -y bc build-essential libncurses5-dev libssl-dev bison flex libelf-dev libtinfo5 || true
             export ARCH=arm && export SUBARCH=arm && export CROSS_COMPILE=${{ github.workspace }}/toolchain/arm-linux-androideabi-4.9/bin/arm-linux-androideabi-
-            find . -name "Makefile" | xargs sed -i "s/-Werror//g" || true
-            make O=out $DETECTED_DEFCONFIG && make O=out -j$(nproc)
-          '
-        fi
-

@@ -143,11 +143,17 @@ jobs:
           cp out/arch/arm/boot/zImage ${{ github.workspace }}/output_binaries/zImage-stock
           echo "any_baseline_passed=true" >> $GITHUB_OUTPUT
           
-          if [ "${{ steps.build_host.outputs.success }}" = "true" ]; then echo "WORKING_ERA=host" >> $GITHUB_ENV;
-          elif [ "${{ steps.build_u20.outputs.success }}" = "true" ]; then echo "WORKING_ERA=ubuntu:20.04" >> $GITHUB_ENV;
-          elif [ "${{ steps.build_u18.outputs.success }}" = "true" ]; then echo "WORKING_ERA=ubuntu:18.04" >> $GITHUB_ENV;
-          elif [ "${{ steps.build_u16.outputs.success }}" = "true" ]; then echo "WORKING_ERA=ubuntu:16.04" >> $GITHUB_ENV;
-          else echo "WORKING_ERA=ubuntu:14.04" >> $GITHUB_ENV; fi
+          if [ "${{ steps.build_host.outputs.success }}" = "true" ]; then
+            echo "WORKING_ERA=host" >> $GITHUB_ENV
+          elif [ "${{ steps.build_u20.outputs.success }}" = "true" ]; then
+            echo "WORKING_ERA=ubuntu:20.04" >> $GITHUB_ENV
+          elif [ "${{ steps.build_u18.outputs.success }}" = "true" ]; then
+            echo "WORKING_ERA=ubuntu:18.04" >> $GITHUB_ENV
+          elif [ "${{ steps.build_u16.outputs.success }}" = "true" ]; then
+            echo "WORKING_ERA=ubuntu:16.04" >> $GITHUB_ENV
+          else
+            echo "WORKING_ERA=ubuntu:14.04" >> $GITHUB_ENV
+          fi
         else
           echo "CRITICAL ERROR: All descending containers failed compilation."
           exit 1
@@ -162,8 +168,11 @@ jobs:
         rm -rf out/
 
         if [ "$WORKING_ERA" = "host" ]; then
-          export ARCH=arm && export SUBARCH=arm && export CROSS_COMPILE=${{ github.workspace }}/toolchain/arm-linux-androideabi-4.9/bin/arm-linux-androideabi-
-          make O=out $DETECTED_DEFCONFIG && make O=out -j$(nproc)
+          export ARCH=arm
+          export SUBARCH=arm
+          export CROSS_COMPILE=${{ github.workspace }}/toolchain/arm-linux-androideabi-4.9/bin/arm-linux-androideabi-
+          make O=out $DETECTED_DEFCONFIG
+          make O=out -j$(nproc)
         else
           docker run --rm -v ${{ github.workspace }}:${{ github.workspace }} -w ${{ github.workspace }} $WORKING_ERA sh -c '
             apt-get update && apt-get install -y bc build-essential libncurses5-dev libssl-dev bison flex libelf-dev libtinfo5 || true
@@ -184,6 +193,3 @@ jobs:
         fi
 
     # ==================== STEP 4: EXPORT ARTIFACTS ====================
-    - name: Upload Finished Kernel Artifacts
-      uses: actions/upload-artifact@v4
-      with:

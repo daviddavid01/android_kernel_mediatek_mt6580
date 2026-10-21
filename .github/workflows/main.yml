@@ -5,13 +5,26 @@ on:
 
 jobs:
   descending-compile:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
-    - name: Checkout Kernel Source Code
+    # ==================== STEP 0: DESCENDING CHECKOUT MECHANISM ====================
+    - name: Try Checkout via Modern Actions API (Tier 1)
+      id: checkout_v4
+      continue-on-error: true
       uses: actions/checkout@v4
       with:
         fetch-depth: 1
+
+    - name: Fallback Checkout via Manual Raw Git Stream (Tier 2)
+      if: steps.checkout_v4.outcome == 'failure'
+      run: |
+        echo "Modern Checkout failed. Initializing manual raw git fallback..."
+        rm -rf ./* .* 2>/dev/null || true
+        git init
+        git remote add origin https://github.com{{ github.repository }}.git
+        git fetch --depth 1 origin ${{ github.ref }}
+        git checkout FETCH_HEAD
 
     - name: Setup Output Directories
       run: mkdir -p ${{ github.workspace }}/output_binaries
@@ -61,20 +74,19 @@ jobs:
       run: |
         mkdir -p ${{ github.workspace }}/toolchain
         cd ${{ github.workspace }}/toolchain
-        # FIXED: Absolute explicit string targeting the real Android platform repository
+        # Full explicit string ensures zero redirection drop errors
         git clone --depth=1 https://googlesource.com
 
     # ==================== STEP 2: MULTI-ERA DESCENDING COMPILATION ENGINE ====================
-    - name: Try Compiling Stock - Modern Tier (Host Ubuntu-Latest)
+    - name: Try Compiling Stock - Modern Tier (Host Ubuntu 24.04)
       id: build_host
       continue-on-error: true
       run: |
-        echo "=== Attempting Compilation on Host (Modern Ubuntu) ==="
+        echo "=== Attempting Compilation on Host ==="
         sudo apt-get update && sudo apt-get install -y bc build-essential libncurses5-dev libssl-dev bison flex libelf-dev
         export ARCH=arm
         export SUBARCH=arm
         export CROSS_COMPILE=${{ github.workspace }}/toolchain/arm-linux-androideabi-4.9/bin/arm-linux-androideabi-
-        # FIXED: Pre-initializing out directory parameters to prevent Makefile break
         mkdir -p out
         make O=out $DETECTED_DEFCONFIG
         make O=out -j$(nproc)
@@ -194,8 +206,3 @@ jobs:
         rm -rf out/ && mkdir -p out
 
         if [ "$WORKING_ERA" = "host" ]; then
-          export ARCH=arm && export SUBARCH=arm && export CROSS_COMPILE=${{ github.workspace }}/toolchain/arm-linux-androideabi-4.9/bin/arm-linux-androideabi-
-          make O=out $DETECTED_DEFCONFIG && make O=out -j$(nproc)
-        else
-          docker run --rm -v ${{ github.workspace }}:${{ github.workspace }} -w ${{ github.workspace }} $WORKING_ERA sh -c '
-            apt-get update && apt-get install -y bc build-essential libncurses5-dev libssl-dev bison flex libelf-dev libtinfo5 || true

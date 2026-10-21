@@ -1,0 +1,105 @@
+name: MediaTek MT6580 Conditional Kernel Compiler
+
+on:
+  workflow_dispatch: # Allows manual trigger from GitHub UI
+
+jobs:
+  build-kernel:
+    runs-on: ubuntu-22.04
+
+    steps:
+    - name: Checkout Kernel Source Code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 1 # Shallow clone to optimize build time
+
+    - name: Set Up Build Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y bc build-essential libncurses5-dev libssl-dev tclsh findutils xz-utils bison flex git libelf-dev ccache
+
+    - name: Download Legacy GCC 4.9 Toolchain
+      run: |
+        mkdir -p $GITHUB_WORKSPACE/toolchain
+        cd $GITHUB_WORKSPACE/toolchain
+        # Fetching standard Google prebuilt legacy 32-bit ARM compiler
+        git clone --depth=1 https://googlesource.com
+
+    - name: Configure Environment Variables
+      run: |
+        echo "ARCH=arm" >> $GITHUB_ENV
+        echo "SUBARCH=arm" >> $GITHUB_ENV
+        echo "CROSS_COMPILE=$GITHUB_WORKSPACE/toolchain/arm-linux-androideabi-4.9/bin/arm-linux-androideabi-" >> $GITHUB_ENV
+        # Replace 'rainbow_defconfig' with your actual target defconfig filename
+        echo "DEFCONFIG_NAME=rainbow_defconfig" >> $GITHUB_ENV 
+
+    # ==================== STEP 1: BASELINE COMPILATION ====================
+    - name: Compile Stock Baseline Kernel
+      id: compile_stock
+      run: |
+        echo "Initializing Defconfig..."
+        make O=out $DEFCONFIG_NAME
+        
+        echo "Starting Main Baseline Compilation..."
+        make O=out -j$(nproc)
+        
+        if [ -f "out/arch/arm/boot/zImage" ]; then
+          echo "Baseline Build Succeeded!"
+          mkdir -p $GITHUB_WORKSPACE/output_binaries
+          cp out/arch/arm/boot/zImage $GITHUB_WORKSPACE/output_binaries/zImage-stock
+          echo "baseline_success=true" >> $GITHUB_OUTPUT
+        else
+          echo "Baseline compilation failed to generate zImage."
+          echo "baseline_success=false" >> $GITHUB_OUTPUT
+          exit 1 # Hard stop here
+        fi
+
+    # ==================== STEP 2: CONDITIONAL OVERCLOCK ====================
+    - name: Inject Overclock Mod & Recompile
+      if: steps.compile_stock.outputs.baseline_success == 'true'
+      run: |
+        echo "Baseline verified. Injecting 1.49 GHz Overclock parameters..."
+        
+        # Target CPU frequency array file path
+        FREQ_FILE="drivers/misc/mediatek/mach/mt6580/mt_cpufreq.c"
+        
+        if [ -f "$FREQ_FILE" ]; then
+          # Modifying code via stream editor (sed) to place the overclock step at the start of array map
+          # This inserts {1495000, 1275}, right below the opening bracket of mt6580_freqs array
+          sed -i '/struct cpu_frequency_info mt6580_freqs\[\] = {/a \ \ \ \ \{1495000, 1275\},' $FREQ_FILE
+          echo "Code injected successfully into $FREQ_FILE"
+        else
+          echo "Warning: Target frequency file path not found. Checking alternate path..."
+          # Fallback path adjustment if repository structure handles it under general cpufreq paths
+          ALT_FREQ_FILE="arch/arm/mach-mt6580/mt_cpufreq.c"
+          if [ -f "$ALT_FREQ_FILE" ]; then
+             sed -i '/struct cpu_frequency_info mt6580_freqs\[\] = {/a \ \ \ \ \{1495000, 1275\},' $ALT_FREQ_FILE
+          else
+             echo "Error: Could not locate frequency array maps. Aborting overclock build."
+             exit 1
+          fi
+        fi
+
+        echo "Cleaning previous output object trees..."
+        rm -rf out/
+        
+        echo "Re-initializing config for Overclock build..."
+        make O=out $DEFCONFIG_NAME
+        
+        echo "Compiling Overclocked Kernel..."
+        make O=out -j$(nproc)
+        
+        if [ -f "out/arch/arm/boot/zImage" ]; then
+          echo "Overclock Kernel Successfully Built!"
+          cp out/arch/arm/boot/zImage $GITHUB_WORKSPACE/output_binaries/zImage-overclocked
+        else
+          echo "Overclock modifications caused a compilation break."
+          exit 1
+        fi
+
+    # ==================== STEP 3: UPLOAD BINARIES ====================
+    - name: Upload Compiled Kernels to GitHub Actions Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: MT6580-Compiled-Kernels
+        path: ${{ github.workspace }}/output_binaries/*

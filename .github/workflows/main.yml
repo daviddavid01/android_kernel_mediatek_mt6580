@@ -1,210 +1,117 @@
-name: Ultimate Descending Container Auto-Compiler
+name: Ultimate Concurrent Matrix Compiler
 
 on:
   workflow_dispatch:
 
+env:
+  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: "true"
+
 jobs:
-  descending-compile:
+  # ==================== STAGE 1: PARALLEL COMPILATION MATRIX ====================
+  compile-matrix:
     runs-on: ubuntu-24.04
+    continue-on-error: true
+    strategy:
+      # Ensures that if one container environment fails, the others keep compiling
+      fail-fast: false 
+      matrix:
+        # Define all environment combinations to build concurrently
+        era: [host, ubuntu-20.04, ubuntu-18.04, ubuntu-16.04, ubuntu-14.04]
 
     steps:
-    # ==================== STEP 0: AUTO-DESCENDING CHECKOUT MECHANISM ====================
-    - name: Try Checkout via Modern Actions API (Tier 1)
-      id: checkout_v4
-      continue-on-error: true
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 1
-
-    - name: Fallback Checkout via Manual Raw Git Stream (Tier 2)
-      if: steps.checkout_v4.outcome == 'failure'
-      continue-on-error: true
+    - name: Autonomous Checkout Engine
       run: |
-        echo "Modern Checkout failed. Initializing manual raw git fallback..."
+        echo "=== Manual Shallow Fast Clone ==="
         rm -rf ./* .* 2>/dev/null || true
-        git init
-        git remote add origin https://github.com{{ github.repository }}.git
-        git fetch --depth 1 origin ${{ github.ref }}
-        git checkout FETCH_HEAD
+        git clone --depth=1 --branch=${{ github.ref_name }} https://github.com{{ github.repository }}.git .
 
-    - name: Setup Output Directories
-      run: mkdir -p ${{ github.workspace }}/output_binaries
+    - name: Setup Shared Workspace Directories
+      run: mkdir -p output_binaries toolchain out
 
-    # ==================== CRITICAL SYSTEM DETECTION ====================
     - name: Smart Auto-Discovery Engine
       id: discovery
       run: |
-        echo "===== EXECUTING AUTO-DETECTION ====="
-        if [ -f "arch/arm/configs/rainbow_defconfig" ]; then
-          FOUND_CONFIG="rainbow_defconfig"
-        else
-          SCAN_RESULT=$(find arch/arm/configs/ -name "*inharmony*" -o -name "*rainbow*" -o -name "*mt6580*" -o -name "*mtk*" 2>/dev/null | head -n 1)
-          if [ -n "$SCAN_RESULT" ]; then
-            FOUND_CONFIG=$(basename "$SCAN_RESULT")
-          else
-            FALLBACK_SCAN=$(find arch/arm/configs/ -maxdepth 2 -type f 2>/dev/null | head -n 1)
-            if [ -n "$FALLBACK_SCAN" ]; then
-              FOUND_CONFIG=$(basename "$FALLBACK_SCAN")
-            else
-              FOUND_CONFIG="NOT_FOUND"
-            fi
-          fi
-        fi
-
-        if [ "$FOUND_CONFIG" = "NOT_FOUND" ] || [ -z "$FOUND_CONFIG" ]; then
-          echo "CRITICAL WARNING: No baseline configuration files detected anywhere. Forcing automated fallback generation..."
-          mkdir -p arch/arm/configs
-          echo "CONFIG_ARM=y" > arch/arm/configs/generic_fallback_defconfig
-          FOUND_CONFIG="generic_fallback_defconfig"
-        fi
-
-        echo "Target Configuration Settled: $FOUND_CONFIG"
-        echo "DETECTED_DEFCONFIG=$FOUND_CONFIG" >> $GITHUB_ENV
+        echo "===== EXECUTING TARGET PROFILE AUTO-DETECTION ====="
+        FOUND_CONFIG=""
+        for pattern in "rainbow_defconfig" "*sf6580*" "*inharmony*" "*weg*" "*mt6580*" "*mtk*" "*defconfig*"; do
+          SCAN=$(find arch/arm/configs/ -name "$pattern" 2>/dev/null | head -n 1)
+          if [ -n "$SCAN" ]; then FOUND_CONFIG=$(basename "$SCAN"); break; fi
+        done
+        if [ -z "$FOUND_CONFIG" ]; then FOUND_CONFIG=$(find arch/arm/configs/ -type f 2>/dev/null | head -n 1 | xargs basename); fi
+        echo "TARGET_CONFIG=$FOUND_CONFIG" >> $GITHUB_ENV
         
-        TARGET_FREQ=$(find . -name "mt_cpufreq.c" | head -n 1)
-        if [ -n "$TARGET_FREQ" ]; then
-          TARGET_FREQ=$(echo "$TARGET_FREQ" | sed 's|^\./||')
-          echo "DETECTED_FREQ_FILE=$TARGET_FREQ" >> $GITHUB_ENV
-        else
-          echo "DETECTED_FREQ_FILE=NOT_FOUND" >> $GITHUB_ENV
-        fi
+        TARGET_FREQ=$(find . -name "mt_cpufreq.c" | head -n 1 | sed 's|^\./||')
+        if [ -n "$TARGET_FREQ" ]; then echo "FREQ_FILE=$TARGET_FREQ" >> $GITHUB_ENV; else echo "FREQ_FILE=NOT_FOUND" >> $GITHUB_ENV; fi
 
-    # ==================== STEP 1: AUTO-DESCENDING TOOLCHAIN SYSTEM ====================
-    - name: Try Pulling Toolchain via Google Git Master Source (Tier 1)
-      id: pull_google
-      continue-on-error: true
+    - name: Download Cross-Compiler (Resilient Mirror Chain)
       run: |
-        mkdir -p ${{ github.workspace }}/toolchain
-        cd ${{ github.workspace }}/toolchain
-        # FULL STRING FIXED: Explicit remote mapping endpoint string
-        git clone --depth=1 https://googlesource.com
-
-    - name: Fallback Toolchain via Unofficial GitHub Mirror Mirroring (Tier 2)
-      if: steps.pull_google.outcome == 'failure'
-      continue-on-error: true
-      run: |
-        echo "Google source down or blocked. Descending to GitHub Toolchain mirror source..."
-        mkdir -p ${{ github.workspace }}/toolchain
-        cd ${{ github.workspace }}/toolchain
-        rm -rf arm-linux-androideabi-4.9/ || true
+        cd toolchain
+        git clone --depth=1 https://googlesource.com || \
         git clone --depth=1 https://github.com arm-linux-androideabi-4.9
 
-    # ==================== STEP 2: MULTI-ERA DESCENDING COMPILATION ENGINE ====================
-    - name: Try Compiling Stock - Modern Tier (Host Ubuntu 24.04)
-      id: build_host
-      continue-on-error: true
+    # --- STOCK COMPILATION PIPELINE (RUNNING IN PARALLEL) ---
+    - name: Build Stock Kernel [${{ matrix.era }}]
       run: |
-        echo "=== Attempting Compilation on Host ==="
-        sudo apt-get update && sudo apt-get install -y bc build-essential libncurses5-dev libssl-dev bison flex libelf-dev
-        export ARCH=arm
-        export SUBARCH=arm
+        export ARCH=arm && export SUBARCH=arm
         export CROSS_COMPILE=${{ github.workspace }}/toolchain/arm-linux-androideabi-4.9/bin/arm-linux-androideabi-
+        
+        if [ "${{ matrix.era }}" = "host" ]; then
+          sudo apt-get update && sudo apt-get install -y bc build-essential libncurses5-dev libssl-dev bison flex libelf-dev libtinfo5 || true
+          make O=out $TARGET_CONFIG && make O=out -j$(nproc)
+        elif [ "${{ matrix.era }}" = "ubuntu-20.04" ]; then
+          docker run --rm -v ${{ github.workspace }}:${{ github.workspace }} -w ${{ github.workspace }} ubuntu:20.04 sh -c '
+            apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y bc build-essential libncurses5-dev libssl-dev bison flex libelf-dev libtinfo5 || true
+            make O=out $TARGET_CONFIG && make O=out -j$(nproc)'
+        elif [ "${{ matrix.era }}" = "ubuntu-18.04" ]; then
+          docker run --rm -v ${{ github.workspace }}:${{ github.workspace }} -w ${{ github.workspace }} ubuntu:18.04 sh -c '
+            apt-get update && apt-get install -y bc build-essential libncurses5-dev libssl-dev bison flex libelf-dev || true
+            make O=out $TARGET_CONFIG && make O=out -j$(nproc)'
+        elif [ "${{ matrix.era }}" = "ubuntu-16.04" ]; then
+          docker run --rm -v ${{ github.workspace }}:${{ github.workspace }} -w ${{ github.workspace }} ubuntu:16.04 sh -c '
+            apt-get update && apt-get install -y bc build-essential libncurses5-dev libssl-dev bison flex libelf-dev || true
+            find . -name "Makefile" | xargs sed -i "s/-Werror//g" || true
+            make O=out $TARGET_CONFIG && make O=out -j$(nproc)'
+        elif [ "${{ matrix.era }}" = "ubuntu-14.04" ]; then
+          docker run --rm -v ${{ github.workspace }}:${{ github.workspace }} -w ${{ github.workspace }} ubuntu:14.04 sh -c '
+            apt-get update && apt-get install -y bc build-essential libncurses5-dev libssl-dev bison flex || true
+            find . -name "Makefile" | xargs sed -i "s/-Werror//g" || true
+            make O=out $TARGET_CONFIG && make O=out -j$(nproc)'
+        fi
+        
+        if [ -f "out/arch/arm/boot/zImage" ]; then
+          cp out/arch/arm/boot/zImage output_binaries/zImage-stock-${{ matrix.era }}
+        fi
+
+    # --- AUTOMATED INDEPENDENT OVERCLOCK PIPELINE (RUNNING IN PARALLEL) ---
+    - name: Build Overclocked Kernel [${{ matrix.era }}]
+      if: env.FREQ_FILE != 'NOT_FOUND'
+      run: |
+        echo "Injecting overclock array parameters..."
+        sed -i '/struct cpu_frequency_info mt6580_freqs\[\] = {/a \ \ \ \ \{1495000, 1275\},' "$FREQ_FILE" || sed -i '/freqs\[\] = {/a \ \ \ \ \{1495000, 1275\},' "$FREQ_FILE" || true
         rm -rf out && mkdir -p out
-        make O=out $DETECTED_DEFCONFIG
-        make O=out -j$(nproc)
-        if [ -f "out/arch/arm/boot/zImage" ]; then 
-          echo "success=true" >> $GITHUB_OUTPUT
-          cp out/arch/arm/boot/zImage ${{ github.workspace }}/output_binaries/zImage-host
-        else 
-          echo "Host tier failed."
-          exit 1
+        
+        export ARCH=arm && export SUBARCH=arm
+        export CROSS_COMPILE=${{ github.workspace }}/toolchain/arm-linux-androideabi-4.9/bin/arm-linux-androideabi-
+        
+        if [ "${{ matrix.era }}" = "host" ]; then
+          make O=out $TARGET_CONFIG && make O=out -j$(nproc)
+        elif [ "${{ matrix.era }}" = "ubuntu-20.04" ] || [ "${{ matrix.era }}" = "ubuntu-18.04" ]; then
+          docker run --rm -v ${{ github.workspace }}:${{ github.workspace }} -w ${{ github.workspace }} ${{ matrix.era == 'ubuntu-20.04' && 'ubuntu:20.04' || 'ubuntu:18.04' }} sh -c '
+            apt-get update && apt-get install -y bc build-essential libncurses5-dev libssl-dev bison flex libelf-dev libtinfo5 || true
+            make O=out $TARGET_CONFIG && make O=out -j$(nproc)'
+        elif [ "${{ matrix.era }}" = "ubuntu-16.04" ] || [ "${{ matrix.era }}" = "ubuntu-14.04" ]; then
+          docker run --rm -v ${{ github.workspace }}:${{ github.workspace }} -w ${{ github.workspace }} ${{ matrix.era == 'ubuntu-16.04' && 'ubuntu:16.04' || 'ubuntu:14.04' }} sh -c '
+            apt-get update && apt-get install -y bc build-essential libncurses5-dev libssl-dev bison flex || true
+            find . -name "Makefile" | xargs sed -i "s/-Werror//g" || true
+            make O=out $TARGET_CONFIG && make O=out -j$(nproc)'
+        fi
+        
+        if [ -f "out/arch/arm/boot/zImage" ]; then
+          cp out/arch/arm/boot/zImage output_binaries/zImage-overclocked-${{ matrix.era }}
         fi
 
-    - name: Fallback 1 - Descend to Ubuntu 20.04 Container
-      id: build_u20
-      continue-on-error: true
-      run: |
-        echo "=== Running Ubuntu 20.04 Container Sweep ==="
-        docker run --rm -v ${{ github.workspace }}:${{ github.workspace }} -w ${{ github.workspace }} ubuntu:20.04 sh -c '
-          apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y bc build-essential libncurses5-dev libssl-dev bison flex libelf-dev libtinfo5
-          export ARCH=arm && export SUBARCH=arm
-          export CROSS_COMPILE=${{ github.workspace }}/toolchain/arm-linux-androideabi-4.9/bin/arm-linux-androideabi-
-          rm -rf out/ && mkdir -p out
-          make O=out $DETECTED_DEFCONFIG
-          make O=out -j$(nproc)
-        '
-        if [ -f "out/arch/arm/boot/zImage" ]; then 
-          echo "success=true" >> $GITHUB_OUTPUT
-          cp out/arch/arm/boot/zImage ${{ github.workspace }}/output_binaries/zImage-u20
-        else 
-          echo "Ubuntu 20.04 tier failed."
-          exit 1
-        fi
-
-    - name: Fallback 2 - Descend to Ubuntu 18.04 Container
-      id: build_u18
-      continue-on-error: true
-      run: |
-        echo "=== Running Ubuntu 18.04 Container Sweep ==="
-        docker run --rm -v ${{ github.workspace }}:${{ github.workspace }} -w ${{ github.workspace }} ubuntu:18.04 sh -c '
-          apt-get update && apt-get install -y bc build-essential libncurses5-dev libssl-dev bison flex libelf-dev
-          export ARCH=arm && export SUBARCH=arm
-          export CROSS_COMPILE=${{ github.workspace }}/toolchain/arm-linux-androideabi-4.9/bin/arm-linux-androideabi-
-          rm -rf out/ && mkdir -p out
-          make O=out $DETECTED_DEFCONFIG
-          make O=out -j$(nproc)
-        '
-        if [ -f "out/arch/arm/boot/zImage" ]; then 
-          echo "success=true" >> $GITHUB_OUTPUT
-          cp out/arch/arm/boot/zImage ${{ github.workspace }}/output_binaries/zImage-u18
-        else 
-          echo "Ubuntu 18.04 tier failed."
-          exit 1
-        fi
-
-    - name: Fallback 3 - Descend to Vintage Ubuntu 16.04 Container
-      id: build_u16
-      continue-on-error: true
-      run: |
-        echo "=== Running Vintage Ubuntu 16.04 Container Sweep ==="
-        docker run --rm -v ${{ github.workspace }}:${{ github.workspace }} -w ${{ github.workspace }} ubuntu:16.04 sh -c '
-          apt-get update && apt-get install -y bc build-essential libncurses5-dev libssl-dev bison flex libelf-dev
-          export ARCH=arm && export SUBARCH=arm
-          export CROSS_COMPILE=${{ github.workspace }}/toolchain/arm-linux-androideabi-4.9/bin/arm-linux-androideabi-
-          find . -name "Makefile" | xargs sed -i "s/-Werror//g" || true
-          rm -rf out/ && mkdir -p out
-          make O=out $DETECTED_DEFCONFIG
-          make O=out -j$(nproc)
-        '
-        if [ -f "out/arch/arm/boot/zImage" ]; then 
-          echo "success=true" >> $GITHUB_OUTPUT
-          cp out/arch/arm/boot/zImage ${{ github.workspace }}/output_binaries/zImage-u16
-        else 
-          echo "Ubuntu 16.04 tier failed."
-          exit 1
-        fi
-
-    - name: Fallback 4 - Absolute Minimum Descend to Legacy Ubuntu 14.04 Container
-      id: build_u14
-      continue-on-error: true
-      run: |
-        echo "=== Running Legacy Ubuntu 14.04 Container Sweep ==="
-        docker run --rm -v ${{ github.workspace }}:${{ github.workspace }} -w ${{ github.workspace }} ubuntu:14.04 sh -c '
-          apt-get update && apt-get install -y bc build-essential libncurses5-dev libssl-dev bison flex
-          export ARCH=arm && export SUBARCH=arm
-          export CROSS_COMPILE=${{ github.workspace }}/toolchain/arm-linux-androideabi-4.9/bin/arm-linux-androideabi-
-          find . -name "Makefile" | xargs sed -i "s/-Werror//g" || true
-          rm -rf out/ && mkdir -p out
-          make O=out $DETECTED_DEFCONFIG
-          make O=out -j$(nproc)
-        '
-        if [ -f "out/arch/arm/boot/zImage" ]; then 
-          echo "success=true" >> $GITHUB_OUTPUT
-          cp out/arch/arm/boot/zImage ${{ github.workspace }}/output_binaries/zImage-u14
-        else 
-          echo "Ubuntu 14.04 tier failed."
-          exit 1
-        fi
-
-    # ==================== EVALUATE WORKING ENVIRONMENT FOR OVERCLOCK ====================
-    - name: Establish Successful Compilation Base for Overclock
-      id: set_working_era
-      continue-on-error: true
-      run: |
-        if [ -f "${{ github.workspace }}/output_binaries/zImage-host" ]; then echo "WORKING_ERA=host" >> $GITHUB_ENV; echo "run_oc=true" >> $GITHUB_OUTPUT;
-        elif [ -f "${{ github.workspace }}/output_binaries/zImage-u20" ]; then echo "WORKING_ERA=ubuntu:20.04" >> $GITHUB_ENV; echo "run_oc=true" >> $GITHUB_OUTPUT;
-        elif [ -f "${{ github.workspace }}/output_binaries/zImage-u18" ]; then echo "WORKING_ERA=ubuntu:18.04" >> $GITHUB_ENV; echo "run_oc=true" >> $GITHUB_OUTPUT;
-        elif [ -f "${{ github.workspace }}/output_binaries/zImage-u16" ]; then echo "WORKING_ERA=ubuntu:16.04" >> $GITHUB_ENV; echo "run_oc=true" >> $GITHUB_OUTPUT;
-        elif [ -f "${{ github.workspace }}/output_binaries/zImage-u14" ]; then echo "WORKING_ERA=ubuntu:14.04" >> $GITHUB_ENV; echo "run_oc=true" >> $GITHUB_OUTPUT;
-        else echo "run_oc=false" >> $GITHUB_OUTPUT; echo "No base image found across compilation tiers."; fi
-
+    - name: Sideload Artifact Blocks
+      uses: actions/upload-artifact@v4
+      with:
+        name: MT6580-Kernel-${{ matrix.era }}
+        path: ${{ github.workspace }}/output_binaries/*
